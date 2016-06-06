@@ -20,7 +20,7 @@
 
 enum
 {
-    BFONT_MIPMAP = 0x1,
+    //BFONT_MIPMAP = 0x1,
     BFONT_ITALIC = 0x2,
     BFONT_UNDERLINE = 0x4,
     BFONT_STRIKEOUT = 0x8,
@@ -31,7 +31,11 @@ enum
 struct bFontInfo
 {
     char name[BFONT_NAME_MAX_LEN];
-    uint8_t size, weight, r, g, b, shadowx, shadowy, paddingx, paddingy;
+    uint8_t size, weight;
+    uint8_t r, g, b;
+    uint8_t shadowx, shadowy;
+    uint8_t paddingx, paddingy;
+    uint8_t mipBeg, mipEnd, mipAdd;
     //uint8_t mipmap, italic, underline, strikeout;
     uint8_t flags;
     HFONT fontHandle;

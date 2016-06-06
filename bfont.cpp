@@ -63,14 +63,40 @@ int CALLBACK FontEnumCallback( const LOGFONT* lf, const TEXTMETRIC* m,
     return result;
 }
 
+static void LoadFont( bFontInfo* font, HDC deviceContext )
+{
+    LOGFONT logFont = {};
+    logFont.lfHeight = font->size;
+    logFont.lfWeight = font->weight;
+    logFont.lfItalic = font->flags & BFONT_ITALIC;
+    logFont.lfUnderline = font->flags & BFONT_UNDERLINE;
+    logFont.lfStrikeOut = font->flags & BFONT_STRIKEOUT;
+    logFont.lfCharSet = ANSI_CHARSET;
+    logFont.lfOutPrecision = OUT_TT_PRECIS;
+    logFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+    logFont.lfQuality = ( font->flags & BFONT_ANTIALIAS ? ANTIALIASED_QUALITY : NONANTIALIASED_QUALITY);
+    logFont.lfPitchAndFamily = FF_DONTCARE;
+    strncpy( logFont.lfFaceName, font->name, 32 );
+
+    if( font->fontHandle != NULL )
+    {
+        if( DeleteObject( font->fontHandle ) )
+            std::cout << "Font handle deleted." << std::endl;
+
+        font->fontHandle = NULL;
+    }
+    
+    EnumFontFamiliesEx( deviceContext, &logFont, &FontEnumCallback, (LPARAM)font, 0 );
+}
+
 static void RenderFont( bFontInfo* font, HDC imgContext, void* canvasData,
-                        SIZE* glyphSizes, int glyphHeight, int bitmapSize )
+                        int* glyphWidths, int glyphHeight, int bitmapSize )
 {
     int x = 0, y = 0;
     char c = BFONT_RANGE_BEG;
     for( int i=0; i<BFONT_RANGE; i++,c++ )
     {
-        if( x + glyphSizes[i].cx + font->shadowx + font->paddingx >= bitmapSize )
+        if( x + glyphWidths[i] + font->shadowx + font->paddingx >= bitmapSize )
         {
             x = 0;
             y += glyphHeight + font->shadowy + font->paddingy;
@@ -88,7 +114,7 @@ static void RenderFont( bFontInfo* font, HDC imgContext, void* canvasData,
             // TODO: Figure out why RGB is inverted!
             SetTextColor( imgContext, RGB( font->b, font->g, font->r ) );
             TextOut( imgContext, x, y, &c, 1 );                            
-            x += glyphSizes[i].cx + font->shadowx + font->paddingx;
+            x += glyphWidths[i] + font->shadowx + font->paddingx;
         }
     }
 
@@ -104,6 +130,95 @@ static void RenderFont( bFontInfo* font, HDC imgContext, void* canvasData,
         if( *r > 0 || *g > 0 || *b > 0 )
         {
             *a = 255;
+        }
+    }
+}
+
+static void CompileFont( bFontInfo* font, HDC imgContext, std::string &outputStr )
+{
+    HFONT oldFont = (HFONT)SelectObject( imgContext, font->fontHandle );
+
+    TEXTMETRIC textMetrics;
+    GetTextMetrics( imgContext, &textMetrics );
+
+    int glyphHeight = textMetrics.tmHeight;
+
+    int glyphWidths[BFONT_RANGE] = {};
+    SIZE tempSize;
+    for( int i=0; i<BFONT_RANGE; i++ )
+    {
+        char c = BFONT_RANGE_BEG+i;
+        GetTextExtentPoint32( imgContext, &c, 1, &tempSize );
+        glyphWidths[i] = tempSize.cx;
+    }
+
+    int bitmapSize = 16;
+
+    int glyphsAccounted = 0;
+    while( glyphsAccounted < BFONT_RANGE )
+    {
+        glyphsAccounted = 0;
+        bitmapSize *= 2;
+
+        int x = 0, y = glyphHeight + font->shadowy;
+        for( int i=0; i<BFONT_RANGE; i++ )
+        {
+            x += glyphWidths[i] + font->shadowx + font->paddingx;
+            if( x >= bitmapSize )
+            {
+                x = 0;
+                y += glyphHeight + font->shadowy + font->paddingy;
+                if( y >= bitmapSize )
+                    break;
+
+                i--;
+            }
+            else
+                glyphsAccounted++;
+        }
+    }
+
+    void* canvasData = NULL;
+
+    BITMAPINFO canvasInfo = { { sizeof(BITMAPINFOHEADER),
+                                bitmapSize, -bitmapSize, 1, 32,
+                                BI_RGB, 0, 0, 0, 0, 0, },
+                              { 0, 0, 0, 0 } };
+
+    HBITMAP canvas = CreateDIBSection( imgContext,
+                                       &canvasInfo,
+                                       DIB_RGB_COLORS,
+                                       &canvasData,
+                                       NULL, NULL );
+
+    if( canvas && canvasData )
+    {
+        // clear canvas transparent
+        uint32_t* pixel = (uint32_t*)canvasData;
+        for( int i=0; i<bitmapSize*bitmapSize; i++ )
+            *(pixel++) = 0; // rgba
+
+        HBITMAP oldBitmap = (HBITMAP)SelectObject( imgContext, canvas );
+        SetBkMode( imgContext, TRANSPARENT );
+
+        RenderFont( font, imgContext, canvasData,
+                    glyphWidths, glyphHeight, bitmapSize );
+
+        std::string pngName = outputStr + std::string(".png");
+        std::string txtName = outputStr + std::string(".txt");
+
+        bImage image = { canvasData, 0, bitmapSize, bitmapSize };
+        bWritePNG( pngName.c_str(), &image );
+
+        std::ofstream output( txtName );
+        if( output.is_open() )
+        {
+            uint8_t buf[BFONT_RANGE+1] = { glyphHeight };
+            for( int i=1; i<BFONT_RANGE; i++ )
+                buf[i] = (uint8_t)glyphWidths[i];
+
+            output.write( (const char*)buf, BFONT_RANGE+1 );
+            output.close();
         }
     }
 }
@@ -161,8 +276,22 @@ int main( int argc, char* argv[] )
                     i += 2;
                 }
             }
+            /*else if( strcmp( argv[i], "-mipmap" ) == 0 )
+              font.flags |= BFONT_MIPMAP;*/
             else if( strcmp( argv[i], "-mipmap" ) == 0 )
-                font.flags |= BFONT_MIPMAP;
+            {
+                if( argc >= i+3 )
+                {
+                    font.mipBeg = atoi( argv[i+1] );
+                    font.mipEnd = atoi( argv[i+2] );
+                    font.mipAdd = atoi( argv[i+3] );
+
+                    if( font.mipBeg < 1 ) font.mipBeg = 1;
+                    if( font.mipAdd < 1 ) font.mipAdd = 1;
+                    
+                    i += 3;
+                }
+            }
             else if( strcmp( argv[i], "-italic" ) == 0 )
                 font.flags |= BFONT_ITALIC;
             else if( strcmp( argv[i], "-underline" ) == 0 )
@@ -189,24 +318,6 @@ int main( int argc, char* argv[] )
             }
         }
 
-        /*std::string pngName;
-        std::string txtName;
-        
-        if( outputName )
-        {
-            pngName = outputName + std::string(".png");
-            txtName = outputName + std::string(".txt");
-        }
-        else
-        {
-            std::stringstream ss;
-            ss << font.name;
-            if( font.flags & BFONT_MIPMAP == 0 )
-                ss << (int)font.size;
-            pngName = ss.str() + std::string(".png");
-            txtName = ss.str() + std::string(".txt");
-            }*/
-
         std::string outputStr = ( outputName ? outputName : font.name );
 
         std::cout << "Trying to load font: " << font.name << std::endl;
@@ -219,209 +330,31 @@ int main( int argc, char* argv[] )
             std::cout << "Can't find window handle." << std::endl;
         if( deviceContext == NULL )
             std::cout << "Can't find device context." << std::endl;
-        
-        LOGFONT logFont = {};
-        logFont.lfHeight = font.size;
-        logFont.lfWeight = font.weight;
-        logFont.lfItalic = font.flags & BFONT_ITALIC;
-        logFont.lfUnderline = font.flags & BFONT_UNDERLINE;
-        logFont.lfStrikeOut = font.flags & BFONT_STRIKEOUT;
-        logFont.lfCharSet = ANSI_CHARSET;
-        logFont.lfOutPrecision = OUT_TT_PRECIS;
-        logFont.lfClipPrecision = CLIP_DEFAULT_PRECIS;
-        logFont.lfQuality = ( font.flags & BFONT_ANTIALIAS ? ANTIALIASED_QUALITY : NONANTIALIASED_QUALITY);
-        logFont.lfPitchAndFamily = FF_DONTCARE;
-        strncpy( logFont.lfFaceName, font.name, 32 );
 
-        EnumFontFamiliesEx( deviceContext, &logFont, &FontEnumCallback, (LPARAM)&font, 0 );
-
-        if( font.fontHandle != NULL )
+        if( font.mipAdd > 0 && imgContext )
         {
-            std::cout << "Found font: " << font.name << std::endl;
-
-            if( imgContext )
+            std::stringstream ss;
+            
+            for( int i=font.mipBeg; i<=font.mipEnd; i += font.mipAdd )
             {
-                SelectObject( imgContext, font.fontHandle );
-
-                TEXTMETRIC textMetrics;
-                GetTextMetrics( imgContext, &textMetrics );
-
-                int glyphHeight = textMetrics.tmHeight;
-
-                SIZE glyphSizes[BFONT_RANGE] = {};
-                for( int i=0; i<BFONT_RANGE; i++ )
+                font.size = i;                
+                LoadFont( &font, deviceContext );
+                if( font.fontHandle )
                 {
-                    char c = BFONT_RANGE_BEG+i;
-                    GetTextExtentPoint32( imgContext, &c, 1, glyphSizes+i );
-                }
-
-                //int bitmapWidth = 16, bitmapHeight = 16;
-                int bitmapSize = 16;
-
-                int glyphsAccounted = 0;
-                while( glyphsAccounted < BFONT_RANGE )
-                {
-                    glyphsAccounted = 0;
-                    
-                    //bitmapWidth *= 2;
-                    //bitmapHeight *= 2;
-                    bitmapSize *= 2;
-
-                    int x = 0, y = glyphHeight+font.shadowy;
-                    for( int i=0; i<BFONT_RANGE; i++ )
-                    {
-                        x += glyphSizes[i].cx + font.shadowx + font.paddingx;
-                        if( x >= bitmapSize )
-                        {
-                            x = 0;
-                            y += glyphHeight+font.shadowy+font.paddingy;
-                            if( y >= bitmapSize )
-                                break;
-                            
-                            i--;
-                        }
-                        else
-                            glyphsAccounted++;
-                    }
-                }
-
-                void* canvasData = NULL;
-
-                BITMAPINFO canvasInfo = { { sizeof(BITMAPINFOHEADER),
-                                bitmapSize, -bitmapSize, 1, 32,
-                                BI_RGB, 0, 0, 0, 0, 0 },
-                                { 0, 0, 0, 0 } };
-                
-                HBITMAP canvas = CreateDIBSection( imgContext,
-                                                   &canvasInfo,
-                                                   DIB_RGB_COLORS,
-                                                   &canvasData,
-                                                   NULL, NULL );
-
-                if( canvas && canvasData )
-                {
-                    // clear canvas data to RGBA( 0, 0, 0, 0 )
-                    uint8_t* pixel = (uint8_t*)canvasData;
-                    for( int i=0; i<bitmapSize*bitmapSize; i++ )
-                    {
-                        *(pixel++) = 0; // r
-                        *(pixel++) = 0; // g
-                        *(pixel++) = 0; // b
-                        *(pixel++) = 0; // a
-                    }
-
-
-                    SelectObject( imgContext, canvas );
-                    SetBkMode( imgContext, TRANSPARENT );
-                    
-                    if( font.flags & BFONT_MIPMAP )
-                    {
-                        std::stringstream ss;
-                        
-                        int startSize = 8;
-                        int endSize = 64;
-                        for( int i=startSize; i<=endSize; i+=8 )
-                        {
-                            font.size = i;
-                            RenderFont( &font, imgContext, canvasData,
-                                        glyphSizes, glyphHeight, bitmapSize );
-
-                            ss << outputStr << i;
-                            std::string pngName = ss.str() + std::string(".png");
-                            std::string txtName = ss.str() + std::string(".txt");
-                            ss.str("");
-                        
-                            bImage image = { canvasData, 0, bitmapSize, bitmapSize };
-                            bWritePNG( pngName.c_str(), &image );
-
-                            std::ofstream output( txtName );
-                            if( output.is_open() )
-                            {
-                                uint8_t buf[BFONT_RANGE+1];
-                                for( int i=1; i<BFONT_RANGE; i++ )
-                                    buf[i] = (uint8_t)glyphSizes[i].cx;
-
-                                // first index is the height of all glyphs
-                                buf[0] = glyphHeight;
-                        
-                                output.write( (const char*)buf, BFONT_RANGE+1 );
-                                output.close();
-                            }
-                        }
-                    }
-                    else
-                    {
-                        RenderFont( &font, imgContext, canvasData,
-                                    glyphSizes, glyphHeight, bitmapSize );
-
-                        /*int x = 0, y = 0;
-                        char c = BFONT_RANGE_BEG;
-                        for( int i=0; i<BFONT_RANGE; i++,c++ )
-                        {
-                            if( x + glyphSizes[i].cx + font.shadowx + font.paddingx >= bitmapSize )
-                            {
-                                x = 0;
-                                y += glyphHeight + font.shadowy + font.paddingy;
-                                i--;
-                                c--;
-                            }
-                            else
-                            {
-                                if( font.shadowx > 0 || font.shadowx )
-                                {
-                                    SetTextColor( imgContext, RGB( 1, 1, 1 ) );
-                                    TextOut( imgContext, x+font.shadowx, y+font.shadowy, &c, 1 );
-                                }
-                            
-                                // TODO: Figure out why RGB is inverted!
-                                SetTextColor( imgContext, RGB( font.b, font.g, font.r ) );
-                                TextOut( imgContext, x, y, &c, 1 );                            
-                                x += glyphSizes[i].cx + font.shadowx + font.paddingx;
-                            }
-                        }
-
-                        // NOTE: Fix alpha channel
-                        pixel = (uint8_t*)canvasData;
-                        for( int i=0; i<bitmapSize*bitmapSize; i++ )
-                        {
-                            uint8_t* r = pixel++;
-                            uint8_t* g = pixel++;
-                            uint8_t* b = pixel++;
-                            uint8_t* a = pixel++;
-
-                            if( *r > 0 || *g > 0 || *b > 0 )
-                            {
-                                *a = 255;
-                            }
-                            }*/
-
-                        std::string pngName = outputStr + std::string(".png");
-                        std::string txtName = outputStr + std::string(".txt");
-                        
-                        bImage image = { canvasData, 0, bitmapSize, bitmapSize };
-                        bWritePNG( pngName.c_str(), &image );
-
-                        std::ofstream output( txtName );
-                        if( output.is_open() )
-                        {
-                            uint8_t buf[BFONT_RANGE+1];
-                            for( int i=1; i<BFONT_RANGE; i++ )
-                                buf[i] = (uint8_t)glyphSizes[i].cx;
-
-                            // first index is the height of all glyphs
-                            buf[0] = glyphHeight;
-                        
-                            output.write( (const char*)buf, BFONT_RANGE+1 );
-                            output.close();
-                        }
-                    }
+                    ss << outputStr << i;
+                    CompileFont( &font, imgContext, ss.str() );
+                    ss.str("");
                 }
             }
-            else
-                std::cout << "Failed to create image context." << std::endl;
         }
         else
-            std::cout << "Failed to open font: " << font.name << std::endl;
+        {
+            LoadFont( &font, deviceContext );
+            if( font.fontHandle )
+            {
+                CompileFont( &font, imgContext, outputStr );
+            }
+        }
     }
     
     return 0;
