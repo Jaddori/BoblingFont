@@ -25,7 +25,7 @@
 // weight           *
 // rgb              *
 // shadow           *
-// "mip-map"
+// "mip-map"        *
 // italic           *
 // underline        *
 // strikeout        *
@@ -38,8 +38,6 @@ int CALLBACK FontEnumCallback( const LOGFONT* lf, const TEXTMETRIC* m,
                                DWORD fontType, LPARAM lparam )
 {
     int result = 1; // 1 means continue enumerating
-
-    std::cout << "Looking at font: " << lf->lfFaceName << std::endl;
     
     bFontInfo *font = (bFontInfo*)lparam;
     if( strcmp( lf->lfFaceName, font->name ) == 0 )
@@ -80,9 +78,7 @@ static void LoadFont( bFontInfo* font, HDC deviceContext )
 
     if( font->fontHandle != NULL )
     {
-        if( DeleteObject( font->fontHandle ) )
-            std::cout << "Font handle deleted." << std::endl;
-
+        DeleteObject( font->fontHandle );
         font->fontHandle = NULL;
     }
     
@@ -220,7 +216,11 @@ static void CompileFont( bFontInfo* font, HDC imgContext, std::string &outputStr
             output.write( (const char*)buf, BFONT_RANGE+1 );
             output.close();
         }
+
+        SelectObject( imgContext, oldBitmap );
     }
+
+    SelectObject( imgContext, oldFont );
 }
 
 int main( int argc, char* argv[] )
@@ -320,16 +320,9 @@ int main( int argc, char* argv[] )
 
         std::string outputStr = ( outputName ? outputName : font.name );
 
-        std::cout << "Trying to load font: " << font.name << std::endl;
-
         HWND windowHandle = GetConsoleWindow();
         HDC deviceContext = GetDC( windowHandle );
         HDC imgContext = CreateCompatibleDC( deviceContext );
-
-        if( windowHandle == NULL )
-            std::cout << "Can't find window handle." << std::endl;
-        if( deviceContext == NULL )
-            std::cout << "Can't find device context." << std::endl;
 
         if( font.mipAdd > 0 && imgContext )
         {
