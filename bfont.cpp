@@ -189,7 +189,7 @@ int main( int argc, char* argv[] )
             }
         }
 
-        std::string pngName;
+        /*std::string pngName;
         std::string txtName;
         
         if( outputName )
@@ -200,10 +200,14 @@ int main( int argc, char* argv[] )
         else
         {
             std::stringstream ss;
-            ss << font.name << (int)font.size;
+            ss << font.name;
+            if( font.flags & BFONT_MIPMAP == 0 )
+                ss << (int)font.size;
             pngName = ss.str() + std::string(".png");
             txtName = ss.str() + std::string(".txt");
-        }
+            }*/
+
+        std::string outputStr = ( outputName ? outputName : font.name );
 
         std::cout << "Trying to load font: " << font.name << std::endl;
 
@@ -296,24 +300,9 @@ int main( int argc, char* argv[] )
 
                 if( canvas && canvasData )
                 {
-                    if( font.flags & BFONT_MIPMAP )
-                    {
-                        int startSize = 8;
-                        int endSize = 64;
-                        for( int i=startSize; i<=endSize; i+=8 )
-                        {
-                            font.size = i;
-                            RenderFont( &font, imgContext, canvasData,
-                                        glyphSizes, glyphHeight, bitmapSize );
-                        }
-                    }
-                    else
-                        RenderFont( &font, imgContext, canvasData,
-                                    glyphSizes, glyphHeight, bitmapSize );
-                    
                     // clear canvas data to RGBA( 0, 0, 0, 0 )
-                    /*uint8_t* pixel = (uint8_t*)canvasData;
-                    for( int i=0; i<bitmapWidth * bitmapHeight; i++ )
+                    uint8_t* pixel = (uint8_t*)canvasData;
+                    for( int i=0; i<bitmapSize*bitmapSize; i++ )
                     {
                         *(pixel++) = 0; // r
                         *(pixel++) = 0; // g
@@ -324,63 +313,107 @@ int main( int argc, char* argv[] )
 
                     SelectObject( imgContext, canvas );
                     SetBkMode( imgContext, TRANSPARENT );
-
-                    int x = 0, y = 0;
-                    char c = BFONT_RANGE_BEG;
-                    for( int i=0; i<BFONT_RANGE; i++,c++ )
+                    
+                    if( font.flags & BFONT_MIPMAP )
                     {
-                        if( x + glyphSizes[i].cx + font.shadowx + font.paddingx >= bitmapWidth )
+                        std::stringstream ss;
+                        
+                        int startSize = 8;
+                        int endSize = 64;
+                        for( int i=startSize; i<=endSize; i+=8 )
                         {
-                            x = 0;
-                            y += glyphHeight + font.shadowy + font.paddingy;
-                            i--;
-                            c--;
-                        }
-                        else
-                        {
-                            if( font.shadowx > 0 || font.shadowx )
+                            font.size = i;
+                            RenderFont( &font, imgContext, canvasData,
+                                        glyphSizes, glyphHeight, bitmapSize );
+
+                            ss << outputStr << i;
+                            std::string pngName = ss.str() + std::string(".png");
+                            std::string txtName = ss.str() + std::string(".txt");
+                            ss.str("");
+                        
+                            bImage image = { canvasData, 0, bitmapSize, bitmapSize };
+                            bWritePNG( pngName.c_str(), &image );
+
+                            std::ofstream output( txtName );
+                            if( output.is_open() )
                             {
-                                SetTextColor( imgContext, RGB( 1, 1, 1 ) );
-                                TextOut( imgContext, x+font.shadowx, y+font.shadowy, &c, 1 );
+                                uint8_t buf[BFONT_RANGE+1];
+                                for( int i=1; i<BFONT_RANGE; i++ )
+                                    buf[i] = (uint8_t)glyphSizes[i].cx;
+
+                                // first index is the height of all glyphs
+                                buf[0] = glyphHeight;
+                        
+                                output.write( (const char*)buf, BFONT_RANGE+1 );
+                                output.close();
                             }
-                            
-                            // TODO: Figure out why RGB is inverted!
-                            SetTextColor( imgContext, RGB( font.b, font.g, font.r ) );
-                            TextOut( imgContext, x, y, &c, 1 );                            
-                            x += glyphSizes[i].cx + font.shadowx + font.paddingx;
                         }
                     }
-
-                    // NOTE: Fix alpha channel
-                    pixel = (uint8_t*)canvasData;
-                    for( int i=0; i<bitmapWidth*bitmapHeight; i++ )
+                    else
                     {
-                        uint8_t* r = pixel++;
-                        uint8_t* g = pixel++;
-                        uint8_t* b = pixel++;
-                        uint8_t* a = pixel++;
+                        RenderFont( &font, imgContext, canvasData,
+                                    glyphSizes, glyphHeight, bitmapSize );
 
-                        if( *r > 0 || *g > 0 || *b > 0 )
+                        /*int x = 0, y = 0;
+                        char c = BFONT_RANGE_BEG;
+                        for( int i=0; i<BFONT_RANGE; i++,c++ )
                         {
-                            *a = 255;
+                            if( x + glyphSizes[i].cx + font.shadowx + font.paddingx >= bitmapSize )
+                            {
+                                x = 0;
+                                y += glyphHeight + font.shadowy + font.paddingy;
+                                i--;
+                                c--;
+                            }
+                            else
+                            {
+                                if( font.shadowx > 0 || font.shadowx )
+                                {
+                                    SetTextColor( imgContext, RGB( 1, 1, 1 ) );
+                                    TextOut( imgContext, x+font.shadowx, y+font.shadowy, &c, 1 );
+                                }
+                            
+                                // TODO: Figure out why RGB is inverted!
+                                SetTextColor( imgContext, RGB( font.b, font.g, font.r ) );
+                                TextOut( imgContext, x, y, &c, 1 );                            
+                                x += glyphSizes[i].cx + font.shadowx + font.paddingx;
+                            }
                         }
-                        }*/
 
-                    bImage image = { canvasData, 0, bitmapSize, bitmapSize };
-                    bWritePNG( pngName.c_str(), &image );
+                        // NOTE: Fix alpha channel
+                        pixel = (uint8_t*)canvasData;
+                        for( int i=0; i<bitmapSize*bitmapSize; i++ )
+                        {
+                            uint8_t* r = pixel++;
+                            uint8_t* g = pixel++;
+                            uint8_t* b = pixel++;
+                            uint8_t* a = pixel++;
 
-                    std::ofstream output( txtName );
-                    if( output.is_open() )
-                    {
-                        uint8_t buf[BFONT_RANGE+1];
-                        for( int i=1; i<BFONT_RANGE; i++ )
-                            buf[i] = (uint8_t)glyphSizes[i].cx;
+                            if( *r > 0 || *g > 0 || *b > 0 )
+                            {
+                                *a = 255;
+                            }
+                            }*/
 
-                        // first index is the height of all glyphs
-                        buf[0] = glyphHeight;
+                        std::string pngName = outputStr + std::string(".png");
+                        std::string txtName = outputStr + std::string(".txt");
                         
-                        output.write( (const char*)buf, BFONT_RANGE+1 );
-                        output.close();
+                        bImage image = { canvasData, 0, bitmapSize, bitmapSize };
+                        bWritePNG( pngName.c_str(), &image );
+
+                        std::ofstream output( txtName );
+                        if( output.is_open() )
+                        {
+                            uint8_t buf[BFONT_RANGE+1];
+                            for( int i=1; i<BFONT_RANGE; i++ )
+                                buf[i] = (uint8_t)glyphSizes[i].cx;
+
+                            // first index is the height of all glyphs
+                            buf[0] = glyphHeight;
+                        
+                            output.write( (const char*)buf, BFONT_RANGE+1 );
+                            output.close();
+                        }
                     }
                 }
             }
