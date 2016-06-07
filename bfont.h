@@ -20,12 +20,13 @@
 
 enum
 {
-    //BFONT_MIPMAP = 0x1,
+    BFONT_MIPMAP = 0x1,
     BFONT_ITALIC = 0x2,
     BFONT_UNDERLINE = 0x4,
     BFONT_STRIKEOUT = 0x8,
-    BFONT_ANTIALIAS = 0x16,
-    BFONT_PACK = 0x32,
+    BFONT_ANTIALIAS = 0x10,
+    BFONT_PACK = 0x20,
+    BFONT_PACK_ALL = 0x40,
 };
 
 struct bFontInfo

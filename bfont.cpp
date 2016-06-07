@@ -32,7 +32,7 @@
 // output name      *
 // anti-aliasing    *
 // padding          *
-// packing
+// packing          *
 
 int CALLBACK FontEnumCallback( const LOGFONT* lf, const TEXTMETRIC* m,
                                DWORD fontType, LPARAM lparam )
@@ -130,7 +130,7 @@ static void RenderFont( bFontInfo* font, HDC imgContext, void* canvasData,
     }
 }
 
-static void CompileFont( bFontInfo* font, HDC imgContext, std::string &outputStr )
+static void CompileFont( bFontInfo* font, HDC imgContext, FILE *imgFile, FILE *infoFile )
 {
     HFONT oldFont = (HFONT)SelectObject( imgContext, font->fontHandle );
 
@@ -200,24 +200,22 @@ static void CompileFont( bFontInfo* font, HDC imgContext, std::string &outputStr
         RenderFont( font, imgContext, canvasData,
                     glyphWidths, glyphHeight, bitmapSize );
 
-        std::string pngName = outputStr + std::string(".png");
-        std::string txtName = outputStr + std::string(".txt");
-
-        bImage image = { canvasData, 0, bitmapSize, bitmapSize };
-        bWritePNG( pngName.c_str(), &image );
-
-        std::ofstream output( txtName );
-        if( output.is_open() )
+        if( imgFile )
+        {
+            bImage image = { canvasData, 0, bitmapSize, bitmapSize };
+            bWritePNG( imgFile, &image );
+        }
+        if( infoFile )
         {
             uint8_t buf[BFONT_RANGE+1] = { glyphHeight };
-            for( int i=1; i<BFONT_RANGE; i++ )
+            for( int i=0; i<BFONT_RANGE; i++ )
                 buf[i] = (uint8_t)glyphWidths[i];
 
-            output.write( (const char*)buf, BFONT_RANGE+1 );
-            output.close();
+            fwrite( buf, 1, BFONT_RANGE+1, infoFile );
         }
 
         SelectObject( imgContext, oldBitmap );
+        DeleteObject( canvas );
     }
 
     SelectObject( imgContext, oldFont );
@@ -290,6 +288,8 @@ int main( int argc, char* argv[] )
                     if( font.mipAdd < 1 ) font.mipAdd = 1;
                     
                     i += 3;
+
+                    font.flags |= BFONT_MIPMAP;
                 }
             }
             else if( strcmp( argv[i], "-italic" ) == 0 )
@@ -302,6 +302,8 @@ int main( int argc, char* argv[] )
                 font.flags |= BFONT_ANTIALIAS;
             else if( strcmp( argv[i], "-pack" ) == 0 )
                 font.flags |= BFONT_PACK;
+            else if( strcmp( argv[i], "-packall" ) == 0 )
+                font.flags |= BFONT_PACK_ALL | BFONT_PACK;
             else if( strcmp( argv[i], "-padding" ) == 0 )
             {
                 if( argc >= i+2 )
@@ -324,28 +326,104 @@ int main( int argc, char* argv[] )
         HDC deviceContext = GetDC( windowHandle );
         HDC imgContext = CreateCompatibleDC( deviceContext );
 
-        if( font.mipAdd > 0 && imgContext )
+        if( imgContext )
         {
-            std::stringstream ss;
-            
-            for( int i=font.mipBeg; i<=font.mipEnd; i += font.mipAdd )
+            if( font.flags & BFONT_PACK )
             {
-                font.size = i;                
-                LoadFont( &font, deviceContext );
-                if( font.fontHandle )
+                if( font.flags & BFONT_MIPMAP )
                 {
-                    ss << outputStr << i;
-                    CompileFont( &font, imgContext, ss.str() );
-                    ss.str("");
+                    if( font.flags & BFONT_PACK_ALL )
+                    {
+                        FILE *file = fopen( ( outputStr + std::string(".bfont") ).c_str(), "wb" );
+                        for( int i=font.mipBeg; i<=font.mipEnd; i+=font.mipAdd )
+                        {
+                            font.size = i;
+                            LoadFont( &font, deviceContext );
+                            if( font.fontHandle )
+                            {
+                                CompileFont( &font, imgContext, file, file );
+                            }
+                        }
+
+                        fclose( file );
+                    }
+                    else
+                    {
+                        std::stringstream ss;
+
+                        for( int i=font.mipBeg; i<=font.mipEnd; i+=font.mipAdd )
+                        {
+                            font.size = i;
+                            LoadFont( &font, deviceContext );
+                            if( font.fontHandle )
+                            {
+                                ss << outputStr << i << ".bfont";
+                                FILE *file = fopen( ss.str().c_str(), "wb" );
+                                ss.str("");
+
+                                CompileFont( &font, imgContext, file, file );
+
+                                fclose( file );
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    LoadFont( &font, deviceContext );
+                    if( font.fontHandle && imgContext )
+                    {
+                        std::string packName = outputStr + std::string( ".bfont" );
+                        FILE *file = fopen( packName.c_str(), "wb" );
+                        if( file )
+                        {
+                            CompileFont( &font, imgContext, file, file );
+                            fclose( file );
+                        }
+                    }
                 }
             }
-        }
-        else
-        {
-            LoadFont( &font, deviceContext );
-            if( font.fontHandle )
+            else
             {
-                CompileFont( &font, imgContext, outputStr );
+                if( font.flags & BFONT_MIPMAP )
+                {
+                    std::stringstream ss;
+            
+                    for( int i=font.mipBeg; i<=font.mipEnd; i += font.mipAdd )
+                    {
+                        font.size = i;                
+                        LoadFont( &font, deviceContext );
+                        if( font.fontHandle )
+                        {
+                            ss << outputStr << i << ".png";
+                            FILE *imgFile = fopen( ss.str().c_str(), "wb" );
+                            ss.str("");
+
+                            ss << outputStr << i << ".txt";
+                            FILE *infoFile = fopen( ss.str().c_str(), "wb" );
+                            ss.str("");
+
+                            CompileFont( &font, imgContext, imgFile, infoFile );
+
+                            fclose( imgFile );
+                            fclose( infoFile );
+                        }
+                    }
+                }
+                else
+                {
+                    LoadFont( &font, deviceContext );
+                    if( font.fontHandle )
+                    {
+                        FILE *imgFile = fopen( (outputStr + std::string(".png")).c_str(), "wb" );
+                        FILE *infoFile = fopen( (outputStr + std::string(".txt")).c_str(), "wb" );
+
+                        CompileFont( &font, imgContext, imgFile, infoFile );
+
+                        fclose( imgFile );
+                        fclose( infoFile );
+                    }
+                }
             }
         }
     }
