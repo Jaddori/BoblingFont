@@ -10,8 +10,11 @@
 #include <iostream>
 #include <fstream>
 #include <stdint.h>
-//#include <windows.h>
 #include "bpng.h"
+
+#ifdef WIN32
+#include <windows.h>
+#endif
 
 #define BFONT_NAME_MAX_LEN 32
 #define BFONT_RANGE_BEG 32 // ASCII for space
@@ -40,9 +43,9 @@ struct bFontInfo
     //uint8_t mipmap, italic, underline, strikeout;
     uint8_t flags;
     
-    #ifdef _WIN32
+#ifdef WIN32
     HFONT fontHandle;
-    #endif
+#endif
 };
 
 #define BOBLINGFONT_H
