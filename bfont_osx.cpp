@@ -97,6 +97,15 @@ int main( int argc, char* argv[] )
                     outputName = argv[i+1];
             }
         }
+
+        std::string outputStr = ( outputName ? outputName : font.name );
+
+        // load font
+
+        // render font
+        NSGraphicsContext* context = [NSGraphicsContext currentContext];
+
+        // save font
     }
     
     return 0;
