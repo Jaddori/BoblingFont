@@ -1,0 +1,1 @@
+clang++ -o ../build/BoblingFont bfont_osx.cpp -I ~/Documents/libpng/ -I ~/Documents/zlib/ -I ~/Documents/git/boblingpng/code/ -L /usr/local/lib -lpng -lz
